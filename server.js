@@ -44,6 +44,12 @@ app.get("/health", async (req, res) => {
 
         await pool.query("SELECT 1");
 
+	if (process.env.FORCE_UNHEALTHY === "true") {
+            return res.status(503).json({
+                status: "unhealthy"
+            });
+        }
+
         res.status(200).json({
             status: "healthy"
         });
