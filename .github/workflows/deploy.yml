@@ -48,6 +48,24 @@ jobs:
         run: |
           docker pull "$APP_IMAGE"
 
+      # NEW: Remember the currently running good image
+      - name: Save currently deployed image
+        run: |
+          mkdir -p /home/ubuntu/devops-deployment
+
+          CURRENT_IMAGE=$(docker inspect \
+            --format='{{.Config.Image}}' \
+            devops-app 2>/dev/null || true)
+
+          if [ -n "$CURRENT_IMAGE" ]; then
+            echo "$CURRENT_IMAGE" > \
+              /home/ubuntu/devops-deployment/previous-image.txt
+
+            echo "Previous image: $CURRENT_IMAGE"
+          else
+            echo "No previous deployment found."
+          fi
+
       - name: Deploy application
         run: |
           docker compose \
@@ -59,7 +77,10 @@ jobs:
         run: |
           docker ps
 
+      # CHANGED: Failure does not immediately stop the workflow
       - name: Verify application health
+        id: health_check
+        continue-on-error: true
         run: |
           echo "Waiting for application health check..."
 
@@ -75,6 +96,67 @@ jobs:
             sleep 5
           done
 
-          echo "Application health check failed."
+          echo "New deployment failed health verification."
           docker logs --tail 100 devops-app || true
+          exit 1
+
+      # NEW: Only executes when the health check fails
+      - name: Roll back to previous image
+        if: steps.health_check.outcome == 'failure'
+        run: |
+          PREVIOUS_FILE="/home/ubuntu/devops-deployment/previous-image.txt"
+
+          if [ ! -f "$PREVIOUS_FILE" ]; then
+            echo "No previous image available for rollback."
+            exit 1
+          fi
+
+          PREVIOUS_IMAGE=$(cat "$PREVIOUS_FILE")
+
+          echo "Rolling back to:"
+          echo "$PREVIOUS_IMAGE"
+
+          docker pull "$PREVIOUS_IMAGE"
+
+          export APP_IMAGE="$PREVIOUS_IMAGE"
+
+          docker compose \
+            --env-file /home/ubuntu/devops-deployment/.env \
+            -f compose.deploy.yaml \
+            up -d
+
+          echo "Rollback deployment started."
+
+      # NEW: Make sure the old version actually works
+      - name: Verify rollback
+        if: steps.health_check.outcome == 'failure'
+        run: |
+          echo "Verifying rollback..."
+
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent http://localhost:3000/health; then
+              echo
+              echo "Rollback successful."
+
+              docker inspect \
+                --format='Running image: {{.Config.Image}}' \
+                devops-app
+
+              exit 0
+            fi
+
+            echo "Rollback check $attempt failed."
+            sleep 5
+          done
+
+          echo "Rollback failed."
+          docker logs --tail 100 devops-app || true
+          exit 1
+
+      # NEW: Rollback succeeded, but bad deployment must remain FAILED
+      - name: Mark failed deployment
+        if: steps.health_check.outcome == 'failure'
+        run: |
+          echo "New deployment failed."
+          echo "Previous version was restored successfully."
           exit 1
