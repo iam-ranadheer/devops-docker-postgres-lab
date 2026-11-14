@@ -16,6 +16,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      FORCE_UNHEALTHY: ${FORCE_UNHEALTHY:-true}
 
     depends_on:
       db:
