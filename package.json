@@ -4,10 +4,17 @@
   "description": "DevOps hands-on exercise",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "lint": "eslint .",
+    "test": "jest --runInBand"
   },
   "dependencies": {
     "express": "4.21.2",
     "pg": "8.13.1"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1",
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
   }
 }
