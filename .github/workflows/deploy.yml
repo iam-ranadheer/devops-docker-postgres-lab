@@ -1,0 +1,80 @@
+name: Deploy to EC2
+
+on:
+  workflow_run:
+    workflows:
+      - "Build and Push Docker Image"
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    name: Deploy and Verify
+
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+
+    steps:
+      - name: Checkout deployed commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set deployment image
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY}:${{ github.event.workflow_run.head_sha }}"
+          IMAGE="${IMAGE,,}"
+          echo "APP_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "Deploying image: $IMAGE"
+
+      - name: Pull application image
+        run: |
+          docker pull "$APP_IMAGE"
+
+      - name: Deploy application
+        run: |
+          docker compose \
+            --env-file /home/ubuntu/devops-deployment/.env \
+            -f compose.deploy.yaml \
+            up -d
+
+      - name: Show running containers
+        run: |
+          docker ps
+
+      - name: Verify application health
+        run: |
+          echo "Waiting for application health check..."
+
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent http://localhost:3000/health; then
+              echo
+              echo "Application health check passed."
+              echo "Successfully deployed: $APP_IMAGE"
+              exit 0
+            fi
+
+            echo "Health check attempt $attempt failed."
+            sleep 5
+          done
+
+          echo "Application health check failed."
+          docker logs --tail 100 devops-app || true
+          exit 1
